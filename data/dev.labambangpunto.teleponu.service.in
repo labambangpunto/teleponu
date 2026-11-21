@@ -1,0 +1,3 @@
+[D-BUS Service]
+Name=dev.labambangpunto.teleponu
+Exec=@bindir@/teleponu --gapplication-service

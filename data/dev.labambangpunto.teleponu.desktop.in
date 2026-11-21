@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=Teleponu
+Exec=teleponu
+Icon=dev.labambangpunto.teleponu
+Terminal=false
+Type=Application
+Categories=Utility;
+Keywords=GTK;
+StartupNotify=true
+DBusActivatable=true

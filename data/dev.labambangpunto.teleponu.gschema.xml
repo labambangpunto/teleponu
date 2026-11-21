@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist gettext-domain="teleponu">
+  <schema id="dev.labambangpunto.teleponu" path="/dev/labambangpunto/teleponu/">
+    <key name="remember-recent-file" type="b">
+      <default>true</default>
+      <summary>Remember recent file path</summary>
+      <description>Store the path of the most recently opened or saved VCF file.</description>
+    </key>
+    <key name="auto-open-last-file" type="b">
+      <default>false</default>
+      <summary>Open last file on startup</summary>
+      <description>Automatically load the last opened VCF file when the application starts.</description>
+    </key>
+    <key name="last-opened-file" type="s">
+      <default>''</default>
+      <summary>Last opened file path</summary>
+      <description>Filesystem path to the most recently opened VCF 3.0 file.</description>
+    </key>
+  </schema>
+</schemalist>

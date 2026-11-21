@@ -1,0 +1,51 @@
+# --- Rust / Cargo ---
+# Hasil kompilasi (debug, release, incremental, flycheck, dll.)
+/target/
+
+# Cargo.lock tetap di-commit karena ini aplikasi (bukan library)
+
+# Backup dari rustfmt
+**/*.rs.bk
+
+# Output cargo-mutants (jika dipakai)
+mutants.out*/
+
+# --- Meson ---
+# Direktori build
+/build/
+/_build/
+/builddir/
+
+# File yang dihasilkan Meson dari template *.in
+/src/config.rs
+
+# --- Flatpak ---
+.flatpak-builder/
+/flatpak-build/
+/repo/
+*.flatpak
+
+# --- Editor / IDE ---
+.vscode/
+.idea/
+*.iml
+*.swp
+*.swo
+*~
+.vim/
+.helix/
+
+# --- GNOME Builder ---
+.var/
+
+# --- Sistem operasi ---
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Lain-lain ---
+*.log
+*.orig
+*.rej
+.env
+.env.*
