@@ -23,6 +23,7 @@ impl ObjectImpl for TeleponuApplication {
             self.parent_constructed();
             let obj = self.obj();
             obj.setup_gactions();
+            obj.set_accels_for_action("win.new-file", &["<primary><shift>n"]);
             obj.set_accels_for_action("win.add-contact", &["<primary>n"]);
             obj.set_accels_for_action("win.open", &["<primary>o"]);
             obj.set_accels_for_action("win.save", &["<primary>s"]);

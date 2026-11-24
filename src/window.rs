@@ -124,6 +124,17 @@ mod imp {
                 }));
                 return glib::Propagation::Stop;
             }
+
+            let is_empty_new_file = self.root_stack.visible_child_name().as_deref()
+                == Some("editor")
+                && self.current_file.borrow().is_none()
+                && self.contacts.borrow().is_empty();
+
+            if is_empty_new_file {
+                obj.confirm_close_empty_new_file();
+                return glib::Propagation::Stop;
+            }
+
             glib::Propagation::Proceed
         }
     }
@@ -169,6 +180,10 @@ impl TeleponuWindow {
     }
 
     fn setup_actions(&self) {
+        let new_file_action = gio::ActionEntry::builder("new-file")
+            .activate(move |win: &Self, _, _| win.prompt_new_file())
+            .build();
+
         let open_action = gio::ActionEntry::builder("open")
             .activate(move |win: &Self, _, _| win.prompt_open_file())
             .build();
@@ -190,6 +205,7 @@ impl TeleponuWindow {
             .build();
 
         self.add_action_entries([
+            new_file_action,
             open_action,
             open_recent_action,
             save_action,
@@ -202,16 +218,31 @@ impl TeleponuWindow {
         self.load_custom_css();
         let imp = self.imp();
 
-        // === Page 1: Welcome Screen ===
+     // === Page 1: Welcome Screen ===
         let welcome_header = adw::HeaderBar::new();
-        welcome_header.pack_end(&self.build_primary_menu_button());
+        welcome_header.pack_end(&self.build_welcome_menu_button());
+
+        let new_file_btn = gtk::Button::builder()
+            .label("New File")
+            .css_classes(["pill"])
+            .tooltip_text("Create a New VCF File (Ctrl+Shift+N)")
+            .action_name("win.new-file")
+            .build();
 
         let open_btn = gtk::Button::builder()
             .label("Open File")
-            .halign(gtk::Align::Center)
             .css_classes(["pill", "suggested-action"])
+            .tooltip_text("Open VCF File (Ctrl+O)")
             .action_name("win.open")
             .build();
+
+        let primary_btn_row = gtk::Box::builder()
+            .orientation(gtk::Orientation::Horizontal)
+            .spacing(12)
+            .halign(gtk::Align::Center)
+            .build();
+        primary_btn_row.append(&new_file_btn);
+        primary_btn_row.append(&open_btn);
 
         imp.recent_btn.set_halign(gtk::Align::Center);
         imp.recent_btn.add_css_class("pill");
@@ -223,7 +254,7 @@ impl TeleponuWindow {
             .spacing(10)
             .halign(gtk::Align::Center)
             .build();
-        btn_box.append(&open_btn);
+        btn_box.append(&primary_btn_row);
         btn_box.append(&imp.recent_btn);
 
         let welcome_status = adw::StatusPage::builder()
@@ -496,9 +527,22 @@ impl TeleponuWindow {
             );
         }
     }
+fn build_welcome_menu_button(&self) -> gtk::MenuButton {
+        let menu = gio::Menu::new();
+        menu.append(Some("_About Teleponu"), Some("app.about"));
+        menu.append(Some("_Quit"), Some("app.quit"));
+
+        gtk::MenuButton::builder()
+            .icon_name("open-menu-symbolic")
+            .menu_model(&menu)
+            .primary(true)
+            .tooltip_text("Main Menu")
+            .build()
+    }
 
     fn build_primary_menu_button(&self) -> gtk::MenuButton {
         let file_section = gio::Menu::new();
+        file_section.append(Some("New _File"), Some("win.new-file"));
         file_section.append(Some("_New Contact"), Some("win.add-contact"));
         file_section.append(Some("_Open File..."), Some("win.open"));
         file_section.append(Some("_Save"), Some("win.save"));
@@ -816,7 +860,7 @@ impl TeleponuWindow {
         imp.edit_btn.set_visible(!editing && has_selection);
         imp.save_btn.set_visible(!editing && modified);
 
-        for action_name in ["open", "open-recent", "save-as", "add-contact"] {
+        for action_name in ["new-file", "open", "open-recent", "save-as", "add-contact"] {
             if let Some(action) = self.lookup_action(action_name) {
                 if let Some(simple_action) = action.downcast_ref::<gio::SimpleAction>() {
                     simple_action.set_enabled(!editing);
@@ -942,7 +986,41 @@ impl TeleponuWindow {
         self.rebuild_contact_list(next_idx);
         self.show_toast("Contact deleted");
     }
+    fn prompt_new_file(&self) {
+        if self.imp().is_editing.get() {
+            return;
+        }
 
+        let win_weak = self.downgrade();
+        let action = Rc::new(move || {
+            let Some(win) = win_weak.upgrade() else {
+                return;
+            };
+            win.create_new_file();
+        });
+
+        if self.imp().is_modified.get() {
+            self.confirm_discard_or_save(action);
+        } else {
+            action();
+        }
+    }
+
+    fn create_new_file(&self) {
+        let imp = self.imp();
+        *imp.edit_snapshot.borrow_mut() = None;
+        *imp.editor_validator.borrow_mut() = None;
+        *imp.contacts.borrow_mut() = Vec::new();
+        *imp.current_file.borrow_mut() = None;
+        imp.selected_index.set(None);
+        imp.is_editing.set(false);
+        imp.search_entry.set_text("");
+
+        imp.root_stack.set_visible_child_name("editor");
+        self.set_modified(false);
+        self.rebuild_contact_list(None);
+        self.show_toast("New file created");
+    }
     fn prompt_open_file(&self) {
         let win_weak = self.downgrade();
         let action = Rc::new(move || {
@@ -1005,26 +1083,16 @@ impl TeleponuWindow {
         match std::fs::read_to_string(&path) {
             Ok(content) => match parse_vcf(&content) {
                 Ok(cards) => {
-                    let count = cards.len();
-                    let imp = self.imp();
-                    *imp.contacts.borrow_mut() = cards;
-                    *imp.current_file.borrow_mut() = Some(path.clone());
-                    imp.root_stack.set_visible_child_name("editor");
-                    self.set_modified(false);
-                    self.record_recent_file(&path);
-                    self.rebuild_contact_list(if count > 0 { Some(0) } else { None });
-                    let msg = if count == 1 {
-                        "1 contact loaded".to_string()
-                    } else {
-                        format!("{} contacts loaded", count)
-                    };
-                    self.show_toast(&msg);
+                    self.apply_loaded_cards(path, cards);
                 }
                 Err(err) => {
-                    if is_startup {
+                    let err_msg = err.to_string();
+                    if err_msg.contains("empty or contains no VCARD blocks") {
+                        self.confirm_open_empty_vcf(path, &err_msg);
+                    } else if is_startup {
                         self.show_toast("Failed to auto-open last file");
                     } else {
-                        self.show_error_dialog("Failed to Read VCF 3.0", &err.to_string());
+                        self.show_error_dialog("Failed to Read VCF 3.0", &err_msg);
                     }
                 }
             },
@@ -1036,6 +1104,55 @@ impl TeleponuWindow {
                 }
             }
         }
+    }
+
+    fn apply_loaded_cards(&self, path: PathBuf, cards: Vec<VCard>) {
+        let count = cards.len();
+        let imp = self.imp();
+        *imp.edit_snapshot.borrow_mut() = None;
+        *imp.editor_validator.borrow_mut() = None;
+        *imp.contacts.borrow_mut() = cards;
+        *imp.current_file.borrow_mut() = Some(path.clone());
+        imp.selected_index.set(None);
+        imp.is_editing.set(false);
+        imp.search_entry.set_text("");
+
+        imp.root_stack.set_visible_child_name("editor");
+        self.set_modified(false);
+        self.record_recent_file(&path);
+        self.rebuild_contact_list(if count > 0 { Some(0) } else { None });
+
+        let msg = if count == 0 {
+            "Empty VCF file opened".to_string()
+        } else if count == 1 {
+            "1 contact loaded".to_string()
+        } else {
+            format!("{} contacts loaded", count)
+        };
+        self.show_toast(&msg);
+    }
+
+    fn confirm_open_empty_vcf(&self, path: PathBuf, reason: &str) {
+        let body = format!("{}\n\nDo you want to open this file anyway?", reason);
+
+        let dialog = adw::AlertDialog::builder()
+            .heading("Empty VCF File")
+            .body(&body)
+            .build();
+
+        dialog.add_responses(&[("cancel", "Cancel"), ("proceed", "Still Proceed")]);
+        dialog.set_response_appearance("proceed", adw::ResponseAppearance::Suggested);
+        dialog.set_default_response(Some("proceed"));
+        dialog.set_close_response("cancel");
+
+        let win_weak = self.downgrade();
+        dialog.choose(self, gio::Cancellable::NONE, move |response| {
+            if response.as_str() == "proceed" {
+                if let Some(win) = win_weak.upgrade() {
+                    win.apply_loaded_cards(path, Vec::new());
+                }
+            }
+        });
     }
 
     fn collect_all_validation_warnings(&self) -> Vec<String> {
@@ -1121,7 +1238,7 @@ impl TeleponuWindow {
             .as_ref()
             .and_then(|p| p.file_name())
             .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| "contacts.vcf".to_string());
+            .unwrap_or_else(|| "new-contacts.vcf".to_string());
 
         let dialog = gtk::FileDialog::builder()
             .title("Save VCF 3.0 File")
@@ -1214,6 +1331,29 @@ impl TeleponuWindow {
                     win.save_current_file(Some(proceed));
                 }
                 _ => {}
+            }
+        });
+    }
+
+    fn confirm_close_empty_new_file(&self) {
+        let dialog = adw::AlertDialog::builder()
+            .heading("Close New File?")
+            .body("No contacts have been added to this new file yet. Do you want to continue creating the file or close the window?")
+            .build();
+
+        dialog.add_responses(&[("continue", "Continue Creating"), ("close", "Close Window")]);
+        dialog.set_response_appearance("continue", adw::ResponseAppearance::Suggested);
+        dialog.set_response_appearance("close", adw::ResponseAppearance::Destructive);
+        dialog.set_default_response(Some("continue"));
+        dialog.set_close_response("continue");
+
+        let win_weak = self.downgrade();
+        dialog.choose(self, gio::Cancellable::NONE, move |response| {
+            if response.as_str() == "close" {
+                if let Some(win) = win_weak.upgrade() {
+                    win.imp().root_stack.set_visible_child_name("welcome");
+                    win.close();
+                }
             }
         });
     }
